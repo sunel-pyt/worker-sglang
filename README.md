@@ -46,13 +46,37 @@ All behaviour is controlled through environment variables:
 | `SHOW_TIME_COST`                  | Show time cost of custom marks                    | false                                 | boolean (true or false)                                                                   |
 | `DISABLE_RADIX_CACHE`             | Disable RadixAttention for prefix caching         | false                                 | boolean (true or false)                                                                   |
 | `DISABLE_CUDA_GRAPH`              | Disable CUDA Graph                                | false                                 | boolean (true or false)                                                                   |
+| `DISABLE_PIECEWISE_CUDA_GRAPH`    | Disable piecewise CUDA graph (needed for Qwen3.5) | false                                 | boolean (true or false)                                                                   |
 | `DISABLE_OUTLINES_DISK_CACHE`     | Disable disk cache for Outlines grammar           | false                                 | boolean (true or false)                                                                   |
 | `ENABLE_TORCH_COMPILE`            | Optimize model with torch.compile                 | false                                 | boolean (true or false)                                                                   |
 | `ENABLE_P2P_CHECK`                | Enable P2P check for GPU access                   | false                                 | boolean (true or false)                                                                   |
 | `ENABLE_FLASHINFER_MLA`           | Enable FlashInfer MLA optimization                | false                                 | boolean (true or false)                                                                   |
 | `TRITON_ATTENTION_REDUCE_IN_FP32` | Cast Triton attention reduce op to FP32           | false                                 | boolean (true or false)                                                                   |
+| `ENABLE_MLA`                      | Enable Multi-head Latent Attention                | false                                 | boolean (true or false)                                                                   |
+| `ENABLE_EP_MOE`                   | Enable expert parallelism for MoE                 | false                                 | boolean (true or false)                                                                   |
+| `CHUNKED_PREFILL`                 | Enable chunked prefill                            | false                                 | boolean (true or false)                                                                   |
 | `TOOL_CALL_PARSER`                | Defines the parser used to interpret responses    |                                       | "llama3", "llama4", "mistral", "qwen25", "deepseekv3"                                     |
 | `REASONING_PARSER`                | Defines the parser used for reasoning traces      |                                       | "llama3", "llama4", "mistral", "qwen25", "deepseekv3"                                     |
+| `ATTENTION_BACKEND`               | Attention backend                                 |                                       | "flashinfer", "fa3", "triton"                                                             |
+| `SAMPLING_BACKEND`                | Sampling backend                                  |                                       | "flashinfer", "pytorch"                                                                   |
+| `EXPERT_PARALLEL_SIZE`            | Expert parallelism size for MoE models            |                                       |                                                                                           |
+| `KV_CACHE_DTYPE`                  | Data type for KV cache                            | "auto"                                | "auto", "fp8_e5m2"                                                                        |
+| `CUDA_GRAPH_MAX_BS`               | Max batch size for CUDA graph capture             |                                       |                                                                                           |
+| `MAMBA_SSM_DTYPE`                 | Data type for Mamba SSM states                    |                                       | "bfloat16", "float32"                                                                     |
+| `MAX_MAMBA_CACHE_SIZE`            | Max Mamba cache size                              |                                       |                                                                                           |
+
+## Recommended Settings for Qwen3.5-35B-A3B (H100 80GB)
+
+If you are deploying **Jackrong/Qwen3.5-35B-A3B-Claude-4.6-Opus-Reasoning-Distilled** on a single H100 80GB, use these env vars:
+
+| Environment Variable           | Value         | Why                                                    |
+| ------------------------------ | ------------- | ------------------------------------------------------ |
+| `MEM_FRACTION_STATIC`          | `0.92`        | Model uses 65.5GB; higher fraction gives more KV cache |
+| `CUDA_GRAPH_MAX_BS`            | `32`          | Reduces CUDA graph memory overhead                     |
+| `DISABLE_PIECEWISE_CUDA_GRAPH` | `true`        | Incompatible with Qwen3.5 MRoPE + hybrid Mamba         |
+| `QUANTIZATION`                 | `fp8`         | H100 native FP8 — up to 2x throughput                  |
+| `ATTENTION_BACKEND`            | `flashinfer`  | Faster decode than FA3 on H100                         |
+| `CONTEXT_LENGTH`               | `8192`        | Limits memory usage; increase if longer context needed  |
 
 ## Tool/Function Calling and Reasoning
 
