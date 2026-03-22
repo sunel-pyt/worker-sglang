@@ -45,6 +45,22 @@ open(fp, 'w').write(patched); \
 print('Patched tokenizer_class_from_name: TokenizersBackend -> PreTrainedTokenizerFast') \
 "
 
+# Patch transformers tokenization_utils_base.py to handle extra_special_tokens being a list.
+# Qwen2 tokenizer_config.json stores extra_special_tokens as a list [] (older format), but
+# newer transformers' _set_model_specific_special_tokens calls .keys() expecting a dict.
+# Fix: guard with isinstance check so both list and dict are handled gracefully.
+RUN python3 -c "\
+import inspect; \
+import transformers.tokenization_utils_base as tub; \
+fp = inspect.getfile(tub); \
+txt = open(fp).read(); \
+old = 'self.SPECIAL_TOKENS_ATTRIBUTES = self.SPECIAL_TOKENS_ATTRIBUTES + list(special_tokens.keys())'; \
+new = 'self.SPECIAL_TOKENS_ATTRIBUTES = self.SPECIAL_TOKENS_ATTRIBUTES + (list(special_tokens.keys()) if isinstance(special_tokens, dict) else list(special_tokens))'; \
+patched = txt.replace(old, new, 1) if old in txt else txt; \
+open(fp, 'w').write(patched); \
+print('Patched' if patched != txt else 'Already patched or target not found') \
+"
+
 # PyTorch 2.9.1 (pulled in by SGLang main) has a known bug with CuDNN < 9.15.
 # Install the required CuDNN version as recommended by SGLang's own check.
 # Reference: https://github.com/pytorch/pytorch/issues/168167
