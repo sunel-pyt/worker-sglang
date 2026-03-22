@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir --upgrade \
 # mechanism already used for Gemma3/Llama4/Step3VL.
 # Root cause confirmed in: sglang/srt/configs/model_config.py (mm_disabled_models)
 #                          sglang/srt/managers/tokenizer_manager.py (_get_processor_wrapper)
+# NOTE: this patches sglang (not transformers) so it's safe to run before other pip installs.
 RUN python3 -c "\
 import inspect, sglang.srt.configs.model_config as mc; \
 fp = inspect.getfile(mc); \
@@ -25,41 +26,6 @@ new = '\"Gemma3ForConditionalGeneration\",\n                \"Qwen3_5MoeForCondi
 patched = txt.replace(old, new, 1) if 'Qwen3_5MoeForConditionalGeneration' not in txt.split('mm_disabled_models')[1].split(']')[0] else txt; \
 open(fp, 'w').write(patched); \
 print('Patched' if patched != txt else 'Already patched') \
-"
-
-# Patch transformers to handle "TokenizersBackend" tokenizer class from newer models.
-# Models saved with transformers>=5.0 set tokenizer_class="TokenizersBackend" in
-# tokenizer_config.json, but transformers 4.x doesn't recognize it.
-# Fix: add TokenizersBackend as an alias for PreTrainedTokenizerFast in the
-# tokenizer_class_from_name() function in tokenization_auto.py.
-RUN python3 -c "\
-import inspect; \
-import transformers.models.auto.tokenization_auto as ta; \
-fp = inspect.getfile(ta); \
-txt = open(fp).read(); \
-old = 'if class_name == \"PreTrainedTokenizerFast\":'; \
-new = 'if class_name in (\"PreTrainedTokenizerFast\", \"TokenizersBackend\"):'; \
-assert old in txt, f'Patch target not found in {fp}'; \
-patched = txt.replace(old, new, 1); \
-open(fp, 'w').write(patched); \
-print('Patched tokenizer_class_from_name: TokenizersBackend -> PreTrainedTokenizerFast') \
-"
-
-# Patch transformers tokenization_utils_base.py to handle extra_special_tokens being a list.
-# Qwen2 tokenizer_config.json stores extra_special_tokens as a list [] (older format), but
-# newer transformers' _set_model_specific_special_tokens calls .keys()/.items() expecting a dict.
-# Fix: normalize special_tokens to a dict at the top of the function — an empty list means
-# no model-specific special tokens, so {} is the correct equivalent.
-RUN python3 -c "\
-import inspect; \
-import transformers.tokenization_utils_base as tub; \
-fp = inspect.getfile(tub); \
-txt = open(fp).read(); \
-old = 'def _set_model_specific_special_tokens(self, special_tokens):'; \
-new = 'def _set_model_specific_special_tokens(self, special_tokens):\n        if isinstance(special_tokens, list): special_tokens = {}'; \
-patched = txt.replace(old, new, 1) if old in txt else txt; \
-open(fp, 'w').write(patched); \
-print('Patched' if patched != txt else 'Already patched or target not found') \
 "
 
 # PyTorch 2.9.1 (pulled in by SGLang main) has a known bug with CuDNN < 9.15.
@@ -81,6 +47,47 @@ WORKDIR /sgl-workspace
 # Install worker dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# ── Transformers patches ────────────────────────────────────────────────────
+# These MUST run after ALL pip installs. Any pip step above can upgrade
+# transformers and overwrite previously patched files.
+
+# Patch 1: handle "TokenizersBackend" tokenizer class from newer models.
+# Models saved with transformers>=5.0 set tokenizer_class="TokenizersBackend" in
+# tokenizer_config.json, but transformers 4.x doesn't recognize it.
+# Fix: add TokenizersBackend as an alias for PreTrainedTokenizerFast in
+# tokenizer_class_from_name() in tokenization_auto.py.
+RUN python3 -c "\
+import inspect; \
+import transformers.models.auto.tokenization_auto as ta; \
+fp = inspect.getfile(ta); \
+txt = open(fp).read(); \
+old = 'if class_name == \"PreTrainedTokenizerFast\":'; \
+new = 'if class_name in (\"PreTrainedTokenizerFast\", \"TokenizersBackend\"):'; \
+assert old in txt, f'Patch target not found in {fp}'; \
+patched = txt.replace(old, new, 1); \
+open(fp, 'w').write(patched); \
+print('Patched tokenizer_class_from_name: TokenizersBackend -> PreTrainedTokenizerFast') \
+"
+
+# Patch 2: handle extra_special_tokens being a list instead of a dict.
+# Qwen2 tokenizer_config.json stores extra_special_tokens as [] (older list format),
+# but _set_model_specific_special_tokens calls .keys()/.items() expecting a dict.
+# The transformers main branch already fixes this with an isinstance check (PR merged),
+# but the version installed here is older. Fix: normalize list -> {} at function entry.
+# {} is correct because an empty list means no model-specific special tokens.
+RUN python3 -c "\
+import inspect; \
+import transformers.tokenization_utils_base as tub; \
+fp = inspect.getfile(tub); \
+txt = open(fp).read(); \
+old = 'def _set_model_specific_special_tokens(self, special_tokens):'; \
+new = 'def _set_model_specific_special_tokens(self, special_tokens):\n        if isinstance(special_tokens, list): special_tokens = {}'; \
+patched = txt.replace(old, new, 1) if old in txt else txt; \
+open(fp, 'w').write(patched); \
+print('Patched' if patched != txt else 'Already patched or target not found') \
+"
+# ── End transformers patches ────────────────────────────────────────────────
 
 # Copy source files
 COPY handler.py engine.py utils.py download_model.py test_input.json ./
